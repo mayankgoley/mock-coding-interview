@@ -169,6 +169,40 @@ body.in-room, html:has(body.in-room) { height: 100%; }
 .talk-form input { flex: 1; min-width: 0; max-width: none; padding: 7px 10px; }
 .talk-note { margin: 0; padding: 0 12px 8px; font-size: 11.5px; color: var(--muted); }
 .talk-note:empty { display: none; }
+.debrief { padding: 18px 20px; margin-bottom: 16px; }
+.db-head { display: flex; align-items: center; gap: 10px; }
+.db-head > div:nth-child(2) { flex: 1; display: grid; }
+.db-head b { font-size: 15px; } .db-head span:not(.verdict-pill) { font-size: 12.5px; color: var(--muted); }
+.db-sum { margin: 12px 0 4px; font-size: 15px; line-height: 1.6; }
+.db-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 24px; margin-top: 10px; }
+.debrief ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.55; }
+.debrief li { margin-bottom: 6px; }
+.eyebrow.ok { color: var(--ok); } .eyebrow.warn { color: var(--warn); }
+.db-practice { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.failcase { margin: 12px 0 0; border: 1px solid var(--crit); background: var(--crit-soft); border-radius: 10px; padding: 10px 14px; display: grid; gap: 4px; }
+.failcase .row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; font-size: 13px; align-items: baseline; }
+.failcase .row span { color: var(--muted); }
+.fc-note { margin: 2px 0 0; font-size: 13.5px; line-height: 1.5; }
+.walk { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+.walk h4 { margin: 14px 0 4px; font-size: 13.5px; }
+.walk p, .walk li { font-size: 14px; line-height: 1.6; }
+.walk p { margin: 0; }
+.walk ol, .walk ul { margin: 4px 0 0; padding-left: 20px; }
+.walk li { margin-bottom: 4px; }
+.walk .dry { margin: 4px 0 0; background: var(--sunk); border-radius: 8px; padding: 10px 12px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-x: auto; }
+.behaviour { padding: 16px 0 6px; }
+.bh-top { display: flex; gap: 20px; align-items: flex-start; padding: 0 20px; }
+.bh-top p { flex: 1; margin: 0; font-size: 14.5px; line-height: 1.6; }
+.bh-score b { font-family: var(--font-mono); font-size: 30px; } .bh-score span { color: var(--muted); font-family: var(--font-mono); }
+.bh-stats { padding: 12px 20px 4px; }
+.bh-stats .stat small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.bh-dims { border-top: 1px solid var(--line); margin-top: 10px; }
+.bh-dims .tip { display: block; margin-top: 4px; font-size: 12.5px; color: var(--accent); }
+.bh-dims .tip::before { content: "Tip: "; font-weight: 600; }
+.behaviour .store-note { padding: 0 20px; }
+.failcase code { font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: none; padding: 0; }
+.review { margin-top: 12px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; }
+.review p { margin: 4px 0 0; font-size: 14px; line-height: 1.6; }
 .api-box .api-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .api-box #apiKey { flex: 1 1 240px; max-width: none; }
 .api-box select { width: auto; max-width: 100%; }
@@ -1312,7 +1346,8 @@ var Api = {
       res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", signal: opts.signal,
         headers: { "content-type": "application/json", "x-api-key": this.key(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: opts.model || this.model(), max_tokens: opts.maxTokens || 400, stream: true, messages: messages })
+        body: JSON.stringify(Object.assign({ model: opts.model || this.model(), max_tokens: opts.maxTokens || 400, stream: true, messages: messages },
+          opts.system ? { system: [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }] } : {}))
       });
     } catch (e) { if (e && e.name === "AbortError") throw { code: "cancelled" }; throw { code: "network", message: String(e && e.message || e) }; }
     if (!res.ok) {
@@ -1337,6 +1372,35 @@ var Api = {
     return text;
   }
 };
+
+/* Numbers about how you spoke, measured from the transcript (words and timing; tone of voice isn't captured). */
+var FILLERS = ["um", "uh", "umm", "uhh", "hmm", "like", "basically", "actually", "you know", "i mean", "kind of", "sort of", "i guess", "right"];
+function speechStats(chat, startedAt, endedAt) {
+  var room = (chat || []).filter(function (c) { return c.p !== -1 && c.p !== undefined; });
+  var mine = room.filter(function (c) { return c.w === "me"; }), his = room.filter(function (c) { return c.w === "jordan"; });
+  var wc = function (t) { return words(t).length; };
+  var myWords = mine.reduce(function (a, c) { return a + wc(c.t); }, 0), hisWords = his.reduce(function (a, c) { return a + wc(c.t); }, 0);
+  var fill = 0, fillCount = {};
+  mine.forEach(function (c) {
+    var t = " " + words(c.t).join(" ") + " ";
+    FILLERS.forEach(function (f) { var m = t.split(" " + f + " ").length - 1; if (m) { fill += m; fillCount[f] = (fillCount[f] || 0) + m; } });
+  });
+  var questions = mine.filter(function (c) { return /\?\s*$/.test(c.t) || /^(can|could|should|is|are|do|does|will|would|what|how|when|where|which|why|may)\b/i.test(c.t.trim()); }).length;
+  var times = mine.map(function (c) { return c.at; }).filter(function (x) { return x > 0; });
+  var gaps = [], last = 0;
+  times.forEach(function (t) { gaps.push(t - last); last = t; });
+  if (endedAt && startedAt) gaps.push(endedAt - startedAt - last);
+  var longest = gaps.length ? Math.max.apply(null, gaps) : (endedAt && startedAt ? endedAt - startedAt : 0);
+  var hedges = mine.filter(function (c) { return /\b(i think|maybe|i'm not sure|not sure|probably|i guess|might)\b/i.test(c.t); }).length;
+  var topFill = Object.keys(fillCount).sort(function (a, b) { return fillCount[b] - fillCount[a]; }).slice(0, 3);
+  return {
+    turns: mine.length, words: myWords, avgWords: mine.length ? Math.round(myWords / mine.length) : 0,
+    talkShare: myWords + hisWords ? Math.round(100 * myWords / (myWords + hisWords)) : 0,
+    fillers: fill, fillPer100: myWords ? Math.round(1000 * fill / myWords) / 10 : 0, topFillers: topFill.map(function (f) { return f + " (" + fillCount[f] + ")"; }),
+    questions: questions, hedges: hedges, longestQuietMs: longest,
+    firstSpokeMs: times.length ? times[0] : null
+  };
+}
 
 var Talk = {
   sample: null, ready: false, busy: false, again: false, ctl: null, offWhy: "",
@@ -1375,7 +1439,8 @@ var Talk = {
     if (this.busy) { this.again = true; return; }
     if (!this.sample) { this.reply("I can't reply live right now, but keep talking through it. " + (this.offWhy || ""), false, true); return; }
     this.busy = true; this.again = false; paintVoice();
-    var ctl = this.ctl = new AbortController(), spoken = 0, skip = null, out = "";
+    var ctl = this.ctl = new AbortController(), spoken = 0, skip = null, out = "", self = this;
+    this.started = false;
     var stage = S.stage;
     function speakable(text, final) {
       var t = text.replace(/^\s+/, "");
@@ -1386,17 +1451,21 @@ var Talk = {
       if (skip) return;
       t = t.replace(/\[(nudge|listening)\]\s*/gi, "");
       var upto = final ? t.length : Math.max(t.lastIndexOf(". "), t.lastIndexOf("? "), t.lastIndexOf("! ")) + 1;
-      if (upto > spoken) { var piece = t.slice(spoken, upto); spoken = upto; if (piece.trim()) Voice.speak(piece); }
+      if (upto > spoken) { var piece = t.slice(spoken, upto); spoken = upto; if (piece.trim()) { self.started = true; Voice.speak(piece); } }
       out = t;
     }
     try {
-      var res = await this.sample(this.prompt(), { cache: false, modelTier: "quick", signal: ctl.signal, onText: function (x) { if (S && S.stage === stage) { speakable(x.text, false); showLive(x.text); } } });
+      showLive("thinking");
+      var onText = function (x) { if (S && S.stage === stage) { speakable(x.text, false); if (!skip) showLive(x.text.replace(/^\s*\[nudge\]\s*/i, "") || "thinking"); } };
+      var res = STANDALONE
+        ? await this.sample(this.state(), { system: this.rules(), signal: ctl.signal, onText: onText })
+        : await this.sample(this.prompt(), { cache: false, modelTier: "quick", signal: ctl.signal, onText: onText });
       if (!S || S.stage !== stage) return;
       speakable(res.text, true);
       var nudge = /\[nudge\]/i.test(res.text), listen = /^\s*\[listening\]/i.test(res.text);
       if (nudge && S.stage === "room") { curP().nudges = (curP().nudges || 0) + 1; }
       if (!listen) this.reply(res.text.replace(/\[(nudge|listening)\]\s*/gi, "").trim(), true);
-      else showLive("");
+      else { showLive("listening"); setTimeout(function () { var el = $("liveLine"); if (el && el.dataset.k === "listening") showLive(""); }, 2500); }
     } catch (e) {
       showLive("");
       if (e && e.code === "cancelled") {}
@@ -1418,65 +1487,150 @@ var Talk = {
     else { say(text, { spoken: spoken, local: local }); }
     showLive("");
   },
-  context: function () {
-    var lines = [];
-    var m = MODES[S.mode];
-    lines.push("Format: " + m.say + ". Candidate name: " + S.name + ".");
-    if (S.stage === "intro") {
-      lines.push("Stage: introduction, before the problem is shown. The candidate has not seen the problem yet. Do not describe or hint at the problem. Answer questions about the format briefly, and tell them to press Start or say they're ready when they want to begin.");
-      return lines.join("\n");
+  // The part that stays the same for a whole problem: who Jordan is, how he talks, the problem and the answer key.
+  // In the GitHub copy it goes in the API's system prompt with caching, so each reply is faster and cheaper.
+  rules: function () {
+    var m = MODES[S.mode], L = [];
+    L.push("You are Jordan Ellis, a staff software engineer interviewing " + S.name + " in a live, spoken coding interview at a top tech company (" + m.say + "). Everything you write is read aloud by text to speech, and the candidate answers by voice, transcribed by speech recognition (expect small transcription errors; read past them).");
+    L.push("");
+    L.push("How you talk:");
+    L.push("- Like a real person on a call: natural, warm, concise. Usually one to three short sentences; up to four when they ask you to explain something. Never use markdown, lists, code, or symbols. Say complexities in words, like O of n log n.");
+    L.push("- Always answer when they ask you something, address you, check in, or pause for your reaction. Reply with exactly [listening] (and nothing else) only when they are clearly narrating to themselves mid thought and nothing was directed at you. When in doubt, give a short reply.");
+    L.push("- Respond to what they actually said. Don't repeat yourself, don't restate the problem unless asked, and don't stack several questions; ask one thing at a time.");
+    L.push("");
+    L.push("How you interview:");
+    L.push("- Be a fair, experienced interviewer. Answer clarifying questions accurately from the statement and constraints; if something isn't specified, choose a sensible answer and say it plainly.");
+    L.push("- When they explain an approach, probe the way a real interviewer would: why it is correct, the edge cases, and its time and space complexity. If their complexity is worse than optimal, you may ask whether they can do better, without saying how.");
+    L.push("- While they code, mostly let them work. Ask about a choice only if it matters, and point out a bug only by asking them to test a specific input.");
+    L.push("- Never reveal the optimal approach, the reference solution, the hidden tests, or the hint ladder. If they ask for a hint, say the Hint button costs points, or ask one guiding question about their own idea. If your reply moves them toward the key idea, begin it with [nudge].");
+    L.push("- Don't say whether their solution is correct before they run it; don't over praise. Keep time in mind and help them pace themselves.");
+    if (S.stage !== "room") {
+      L.push("");
+      L.push("Stage: introduction. The candidate has not seen the problem yet. Do not describe or hint at it. Answer questions about the format briefly, and tell them to press Start or say they're ready when they want to begin.");
+      return L.join("\n");
     }
-    var left = S.durationMs - (Date.now() - S.startedAt);
-    lines.push("Stage: coding. Time left in the round: " + fmtClock(left) + ". Problem " + (S.idx + 1) + " of " + S.problems.length + ", on it for " + fmtClock(Date.now() - curP().startAt) + ".");
-    var p = curDef(), st = curP();
-    lines.push("\n## Problem the candidate sees: " + p.title + " (" + p.difficulty + ")");
-    lines.push(p.statement.join("\n"));
-    if (p.constraints) lines.push("Constraints: " + p.constraints.join("; "));
-    if (p.kind === "sql") lines.push("Tables: " + Object.keys(p.tables).map(function (t) { return t + "(" + p.tables[t].map(function (c) { return c[0] + " " + c[1]; }).join(", ") + ")"; }).join("; "));
-    else p.examples.slice(0, 2).forEach(function (e, i) { lines.push("Example " + (i + 1) + ": " + (p.kind === "design" ? pyRepr(e.args[0]) + " " + pyRepr(e.args[1]) : p.params.map(function (n, k) { return n + " = " + clip(pyRepr(e.args[k]), 200); }).join(", ")) + " -> " + clip(pyRepr(e.expected), 200)); });
-    lines.push("\n## For the interviewer only. Never reveal this:");
-    lines.push("Optimal: time " + p.optimal.time + ", space " + p.optimal.space + ". " + (p.optimal.explanation || []).join(" ").slice(0, 1500));
-    lines.push("Hint ladder (the candidate has revealed " + st.hints + " of " + p.hints.length + " with the Hint button): " + p.hints.join(" | "));
-    lines.push("\n## What the candidate has done");
-    lines.push(st.approach ? "Shared approach: " + st.approach.text + " (time " + st.approach.time + ", space " + st.approach.space + ")" : "Has not shared an approach yet; the editor stays locked until they type it in the notepad with time and space complexity.");
-    if (st.notes && st.notes.trim()) lines.push("Notepad (latest):\n" + st.notes.slice(-1200));
-    var code = cm ? cm.getValue() : st.code;
-    if (code && code !== p.starter) lines.push("Current code:\n" + code.slice(-4000));
-    if (st.lastResult) lines.push("Last " + st.lastResult.mode + ": " + st.lastResult.passed + " of " + st.lastResult.total + " passed" + (st.lastResult.tle ? ", large input timed out" : "") + (st.lastResult.status !== "ok" ? ", the code raised an error: " + st.lastResult.err : "") + ".");
-    return lines.join("\n");
+    var p = curDef();
+    L.push("");
+    L.push("## The problem the candidate sees (problem " + (S.idx + 1) + " of " + S.problems.length + "): " + p.title + " (" + p.difficulty + ")");
+    L.push(p.statement.join("\n"));
+    if (p.constraints) L.push("Constraints: " + p.constraints.join("; "));
+    if (p.kind === "sql") L.push("Tables: " + Object.keys(p.tables).map(function (t) { return t + "(" + p.tables[t].map(function (c) { return c[0] + " " + c[1]; }).join(", ") + ")"; }).join("; "));
+    else p.examples.forEach(function (e, i) { L.push("Example " + (i + 1) + ": " + (p.kind === "design" ? pyRepr(e.args[0]) + " " + pyRepr(e.args[1]) : p.params.map(function (n, k) { return n + " = " + clip(pyRepr(e.args[k]), 200); }).join(", ")) + " -> " + clip(pyRepr(e.expected), 200)); });
+    L.push("");
+    L.push("## For you only. Never reveal any of this:");
+    L.push("Optimal: time " + p.optimal.time + ", space " + p.optimal.space + ". " + (p.optimal.explanation || []).join(" ").slice(0, 2000));
+    if (p.kind !== "sql") L.push("Reference solution:\n" + p.optimal.code.slice(0, 3000));
+    L.push("Hint ladder: " + p.hints.join(" | "));
+    if ((p.follow_ups || []).length) L.push("Good follow ups once they solve it: " + p.follow_ups.join(" | "));
+    return L.join("\n");
   },
-  prompt: function () {
-    var convo = (S.chat || []).slice(-30).map(function (c) { return (c.w === "me" ? S.name : c.w === "event" ? "[What just happened]" : "Jordan") + ": " + c.t; }).join("\n");
-    return [
-      "You are Jordan Ellis, a staff software engineer running a live voice coding interview at a top tech company. Everything you write is read aloud by text to speech, then the candidate talks back.",
-      "How to reply:",
-      "- Speak naturally in one to three short sentences. No markdown, no lists, no code, no symbols. Say complexities in words, like O of n log n.",
-      "- Act like a fair, experienced interviewer. Answer clarifying questions accurately from the problem statement and constraints; if something is unspecified, pick a reasonable answer and say so.",
-      "- Never reveal the optimal approach, the reference solution, hidden tests or the hint ladder. If asked for a hint, mention the Hint button costs points, or ask one guiding question about their own idea. If your reply moves them toward the key idea, start it with [nudge].",
-      "- When they explain an approach, probe like a real interviewer: correctness, edge cases, and time and space complexity. When they code, let them work; ask about a choice only if it matters.",
-      "- If they are just thinking out loud and nothing needs a reply, answer with exactly [listening] and nothing else.",
-      "- Keep the tone warm but neutral; don't over praise and don't say whether the final answer is correct before they run it.",
+  // what changes from reply to reply
+  state: function () {
+    var L = [];
+    if (S.stage === "room") {
+      var p = curDef(), st = curP(), left = S.durationMs - (Date.now() - S.startedAt);
+      L.push("## Right now");
+      L.push("Time left in the round: " + fmtClock(left) + ". On this problem for " + fmtClock(Date.now() - st.startAt) + ". Hints revealed with the button: " + st.hints + " of " + p.hints.length + ".");
+      L.push(st.approach ? "Approach they typed in the notepad: " + st.approach.text + " (time " + st.approach.time + ", space " + st.approach.space + ")" : "They haven't typed an approach yet; the editor stays locked until they put it in the notepad with time and space complexity.");
+      if (st.notes && st.notes.trim()) L.push("Their notepad:\n" + st.notes.slice(-1200));
+      var code = cm ? cm.getValue() : st.code;
+      if (code && code !== p.starter) L.push("Their current code:\n" + code.slice(-4000));
+      if (st.lastResult) L.push("Their last " + st.lastResult.mode + ": " + st.lastResult.passed + " of " + st.lastResult.total + " passed" + (st.lastResult.tle ? ", large input timed out" : "") + (st.lastResult.status !== "ok" ? ", the code raised an error: " + st.lastResult.err : "") + ".");
+      L.push("");
+    }
+    var convo = (S.chat || []).slice(-40).map(function (c) { return (c.w === "me" ? S.name : c.w === "event" ? "[What just happened]" : "Jordan") + ": " + c.t; }).join("\n");
+    L.push("## Conversation so far (latest last)");
+    L.push(convo || "(nothing yet)");
+    L.push("");
+    L.push("Reply as Jordan to the latest line. If it is a [What just happened] note, react to it out loud the way an interviewer would.");
+    return L.join("\n");
+  },
+  prompt: function () { return this.rules() + "\n\n" + this.state(); },
+  // After the round Jordan writes a debrief, the way an interviewer writes up feedback: verdict, what went well,
+  // what to fix (pointing at the actual bug in the code), communication, and what to practice next.
+  debrief: async function (per) {
+    if (!this.sample) return null;
+    var spoke = (S.chat || []).filter(function (c) { return c.w === "me"; }).length;
+    var stats = speechStats(S.chat, S.startedAt, S.endedAt);
+    var convo = (S.chat || []).slice(-120).map(function (c) { return "[" + fmtClock(c.at || 0) + "] " + (c.w === "me" ? "Candidate" : c.w === "event" ? "[Event]" : "Interviewer") + ": " + c.t; }).join("\n");
+    var probs = per.map(function (x, k) {
+      var p = BY_ID[x.id], st = S.problems[k];
+      var L = ["### Problem " + (k + 1) + ": " + p.title + " (" + p.difficulty + ")" + (x.reached ? "" : " (not reached)")];
+      if (!x.reached) return L.join("\n");
+      L.push(p.statement.join(" ").slice(0, 1500));
+      if (p.kind !== "sql" && p.examples[0]) L.push("Example 1: " + (p.kind === "design" ? pyRepr(p.examples[0].args[0]) + " " + pyRepr(p.examples[0].args[1]) : p.params.map(function (n, q) { return n + " = " + clip(pyRepr(p.examples[0].args[q]), 160); }).join(", ")) + " -> " + clip(pyRepr(p.examples[0].expected), 160));
+      L.push("Optimal: time " + p.optimal.time + ", space " + p.optimal.space + ". " + (p.optimal.explanation || []).join(" ").slice(0, 1200));
+      L.push("Reference solution:\n" + p.optimal.code.slice(0, 2500));
+      L.push("Approach they stated: " + (st.approach ? st.approach.text + " (time " + st.approach.time + ", space " + st.approach.space + ", shared " + fmtDur(st.approach.at) + " in" + (st.approachLog.length > 1 ? ", revised " + (st.approachLog.length - 1) + " times" : "") + ")" : "none"));
+      L.push("Final tests: " + x.passed + " of " + x.total + " passed. " + (x.genStatus === "wrong" ? "Large input: wrong answer. " : x.genStatus === "tle" ? "Large input: too slow. " : x.genRatio ? "Large input ran " + x.genRatio.toFixed(1) + "x the reference time. " : "") + (x.fail ? "First failing test: " + x.fail.input + "; expected " + x.fail.expected + (x.fail.error ? "; error " + x.fail.error : "; got " + x.fail.got) + ". " : "") + (x.err ? "The code raised: " + x.err : ""));
+      L.push("Hints used: " + x.hints + ". Verbal nudges from the interviewer: " + (x.nudges || 0) + ". Runs (examples only): " + x.runs + ", submits (hidden tests): " + x.submits + ". Time on problem: " + fmtDur(x.spentMs) + " of a " + fmtDur(budgetMs()) + " budget" + (x.solveMs !== null && x.solved ? ", first fully passing submit at " + fmtDur(x.solveMs) : "") + ".");
+      if ((st.notes || "").trim()) L.push("Their notepad:\n" + st.notes.slice(0, 1200));
+      L.push("Their final code:\n" + (x.code || "").slice(0, 4000));
+      return L.join("\n");
+    }).join("\n\n");
+    var statLine = "Measured from the transcript: " + stats.turns + " spoken turns, " + stats.words + " words, average " + stats.avgWords + " words per turn, candidate share of words spoken " + stats.talkShare + "%, filler words " + stats.fillers + " (" + stats.fillPer100 + " per 100 words" + (stats.topFillers.length ? "; most used " + stats.topFillers.join(", ") : "") + "), questions asked " + stats.questions + ", hedging phrases " + stats.hedges + ", longest stretch without speaking " + fmtDur(stats.longestQuietMs) + ", first spoke at " + (stats.firstSpokeMs === null ? "never" : fmtClock(stats.firstSpokeMs)) + ".";
+    var DIMS = ["Understanding and clarifying", "Explaining the approach", "Thinking out loud", "Testing and verification", "Collaboration and coachability", "Time management", "Confidence and composure", "Clarity and conciseness"];
+    var ask = [
+      "You are Jordan Ellis, a staff engineer who just ran a " + MODES[S.mode].label.toLowerCase() + " coding interview (" + MODES[S.mode].minutes + " minutes) with " + S.name + ". Write the debrief you would give them, addressed to them as \"you\": candid, specific and constructive, judged against the bar of a top tech company and the difficulty of the problem. Quote or name the exact line, condition or case behind any failure. Never invent facts that aren't in the data below.",
       "",
-      "## Interview state",
-      this.context(),
+      probs,
       "",
-      "## Conversation so far (latest last)",
-      convo || "(nothing yet)",
+      "## Transcript of the spoken conversation, with timestamps from the start of the round (speech to text, ignore small recognition errors)",
+      spoke ? convo : "(the candidate did not speak or type to the interviewer)",
       "",
-      "Reply as Jordan to the latest line. If it is a [What just happened] note, react to it out loud the way an interviewer would."
+      statLine,
+      "",
+      "## How to judge behaviour",
+      "Use the rubric interviewers at top companies use for the non coding signals of a coding round. Rate each of these dimensions 0 to 100, with evidence (a short quote from the transcript with its timestamp, or a concrete observation like a long silence or never running a test) and one practical tip:",
+      DIMS.map(function (d) { return "- " + d; }).join("\n"),
+      "Understanding and clarifying: restated the problem, asked about input size, edge cases and constraints before designing. Explaining the approach: a clear, structured explanation (idea, why it works, complexity) before coding. Thinking out loud: narrated while coding instead of going silent. Testing and verification: dry ran examples, chose edge cases, ran tests before submitting, debugged methodically. Collaboration and coachability: listened, picked up on the interviewer's questions and nudges, treated it as a conversation. Time management: paced the problem, didn't stall, left time to test. Confidence and composure: committed to decisions, recovered calmly from bugs, limited hedging. Clarity and conciseness: complete sentences, few filler words, to the point.",
+      "If there is little or no speech, say that the evidence is limited and score from the actions you can see (runs, submits, timing) rather than guessing.",
+      "",
+      "Reply with only a JSON object of this shape:",
+      "{",
+      ' "verdict": "Strong hire" | "Hire" | "Lean hire" | "Lean no hire" | "No hire",',
+      ' "summary": "two or three sentences on how the round went overall",',
+      ' "strengths": ["up to three specific things they did well"],',
+      ' "improvements": ["up to three specific, actionable fixes, most important first"],',
+      ' "problems": [{',
+      '   "title": "problem title",',
+      '   "review": "two to four sentences of code review of their final code: the bug or weakness and the fix, or what was good",',
+      '   "walkthrough": {',
+      '     "idea": "the key insight in two or three sentences, the way you would explain it to them at a whiteboard",',
+      '     "steps": ["four to seven steps of the algorithm in plain words"],',
+      '     "example": "a short dry run of the algorithm on a small input, showing how the state changes step by step (use line breaks)",',
+      '     "complexity": "why the time and space are what they are",',
+      '     "edge_cases": ["the edge cases to handle"],',
+      '     "vs_yours": "where their approach or code matched this and where it went wrong"',
+      "   }",
+      " }],",
+      ' "behaviour": {"score": 0 to 100, "summary": "two sentences on how they came across as a candidate", "dimensions": [{"name": "one of the dimension names above", "score": 0 to 100, "evidence": "quote with timestamp or observation", "tip": "one practical tip"}]},',
+      ' "practice": ["up to three concrete things to practice next"]',
+      "}",
+      "Include all eight behaviour dimensions in the order listed. Write plain English sentences without em dashes, en dashes or hyphenated phrases. Use backticks around code."
     ].join("\n");
-  },
-  // one short assessment of how the candidate communicated, used on the scorecard
-  evaluate: async function () {
-    var mine = (S.chat || []).filter(function (c) { return c.w === "me"; });
-    if (!this.sample || mine.length < 2) return null;
-    var convo = S.chat.slice(-80).map(function (c) { return (c.w === "me" ? "Candidate" : c.w === "event" ? "[Event]" : "Interviewer") + ": " + c.t; }).join("\n");
-    var probs = S.problems.map(function (st) { var p = BY_ID[st.id]; return p.title + " (" + p.difficulty + "), final tests " + (st.lastSubmit ? st.lastSubmit.passed + "/" + st.lastSubmit.total : "not submitted"); }).join("; ");
-    var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 30000);
+    var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 150000);
     try {
-      var r = await this.sample.json("You are grading the communication of a candidate in a live coding interview, as a FAANG interviewer would. Problems: " + probs + ".\nTranscript (speech to text, so ignore small recognition errors):\n" + convo + "\n\nRate how clearly they clarified requirements, explained their approach and complexity, thought out loud while coding, and responded to questions. Reply with only JSON like {\"score\": 72, \"strength\": \"one sentence\", \"improve\": \"one sentence\"}. Score is 0 to 100. Write the sentences in plain English without dashes.", { modelTier: "quick", signal: ctl.signal });
-      if (!r || typeof r.score !== "number") return null;
-      return { score: clamp(Math.round(r.score), 0, 100), strength: String(r.strength || "").slice(0, 300), improve: String(r.improve || "").slice(0, 300) };
+      var r = await this.sample.json(ask, { signal: ctl.signal, maxTokens: 4000, modelTier: STANDALONE ? undefined : "default" });
+      if (!r || typeof r !== "object") return null;
+      var str = function (x, n) { return String(x == null ? "" : x).slice(0, n); };
+      var list = function (a, n, m) { return (Array.isArray(a) ? a : []).map(function (x) { return str(x, m || 400); }).filter(Boolean).slice(0, n); };
+      var verdicts = ["Strong hire", "Hire", "Lean hire", "Lean no hire", "No hire"];
+      var b = r.behaviour || r.behavior || {};
+      var dims = (Array.isArray(b.dimensions) ? b.dimensions : []).filter(function (d) { return d && typeof d.score === "number"; }).slice(0, 8)
+        .map(function (d) { return { name: str(d.name, 60), score: clamp(Math.round(d.score), 0, 100), evidence: str(d.evidence, 400), tip: str(d.tip, 300) }; });
+      var bscore = typeof b.score === "number" ? clamp(Math.round(b.score), 0, 100) : dims.length ? Math.round(dims.reduce(function (a, d) { return a + d.score; }, 0) / dims.length) : null;
+      return {
+        verdict: verdicts.indexOf(r.verdict) >= 0 ? r.verdict : null, summary: str(r.summary, 800),
+        strengths: list(r.strengths, 3), improvements: list(r.improvements, 3), practice: list(r.practice, 3),
+        problems: (Array.isArray(r.problems) ? r.problems : []).slice(0, 2).map(function (x) {
+          var w = x && x.walkthrough || {};
+          return { title: str(x && x.title, 120), review: str(x && x.review, 900),
+            walk: { idea: str(w.idea, 700), steps: list(w.steps, 8, 300), example: str(w.example, 1500), complexity: str(w.complexity, 500), edges: list(w.edge_cases, 6, 200), vs: str(w.vs_yours, 700) } };
+        }),
+        behaviour: bscore === null ? null : { score: bscore, summary: str(b.summary, 500), dims: dims },
+        stats: stats
+      };
     } catch (e) { return null; } finally { clearTimeout(t); }
   },
   stop: function () { if (this.ctl) this.ctl.abort(); Voice.cancel(); Ears.stop(true); showLive(""); }
@@ -1496,7 +1650,10 @@ function showLive(text) {
     var el = $(id); if (!el) return;
     if (!text) { el.hidden = true; el.textContent = ""; return; }
     el.hidden = false;
+    el.dataset.k = text === "thinking" || text === "listening" ? text : "";
     if (text.indexOf("you:") === 0) { el.className = "live-line you"; el.textContent = text.slice(4); }
+    else if (text === "thinking") { el.className = "live-line jordan"; el.textContent = "thinking..."; }
+    else if (text === "listening") { el.className = "live-line jordan"; el.textContent = "nods and keeps listening"; }
     else { el.className = "live-line jordan"; el.textContent = text.replace(/\[(nudge|listening)\]\s*/gi, ""); }
   });
 }
@@ -2310,7 +2467,7 @@ function execute(mode, opts) {
     var a = analyzeJob(job);
     if (!opts.final) st.lastResult = { mode: mode, passed: a.passed, total: a.total, status: a.status, tle: !!a.tle, err: clip(job.trace || "", 300) };
     if (withGen) {
-      st.lastSubmit = { hash: hash(code), passed: a.passed, total: a.total, gen: a.gen, status: a.status, at: Date.now() - st.startAt };
+      st.lastSubmit = { hash: hash(code), passed: a.passed, total: a.total, gen: a.gen, status: a.status, at: Date.now() - st.startAt, fail: firstFail(job), err: a.status !== "ok" ? clip(job.trace || "", 600) : "" };
       if (a.status === "ok" && a.passed === a.total && st.firstSolvedMs === null && !opts.final) st.firstSolvedMs = Date.now() - st.startAt;
       saveSession();
     }
@@ -2325,6 +2482,13 @@ function execute(mode, opts) {
     updatePyChips();
     return a;
   });
+}
+function firstFail(job) {
+  var i = job.results.findIndex(function (r) { return r && !r.ok && !r.tle; });
+  if (i < 0 || !job.cases[i]) return null;
+  var r = job.results[i], c = job.cases[i], p = job.def;
+  var input = p && p.kind === "sql" ? "hidden dataset " + (i + 1) : p && p.params && p.kind !== "design" ? p.params.map(function (n, k) { return n + " = " + clip(pyRepr(c.args[k]), 160); }).join(", ") : clip(pyRepr(c.args), 300);
+  return { input: input, expected: p && p.kind === "sql" ? clip(showRows(c.expected), 300) : clip(pyRepr(c.expected), 200), got: r.error ? null : (p && p.kind === "sql" ? clip(showRows(r.got), 300) : clip(pyRepr(r.got), 200)), error: r.error ? clip(String(r.error).split("\n").filter(Boolean).pop() || "", 200) : null };
 }
 function failNote(job) {
   var i = job.results.findIndex(function (r) { return r && !r.ok && !r.tle; });
@@ -2440,11 +2604,18 @@ async function gradeAndShow() {
     }
     $("veilBar").style.width = Math.round(((i + 1) / reached.length) * 90 + 5) + "%";
   }
-  if ((S.chat || []).some(function (c) { return c.w === "me"; })) {
-    $("veilText").textContent = "Jordan is writing feedback on how you communicated.";
-    S.comm = await Talk.evaluate();
-  }
   var rec = scoreSession();
+  if (Talk.sample) {
+    $("veilText").textContent = "Jordan is writing up your feedback: code review, the correct approach and your interview behaviour. This takes about a minute.";
+    $("veilBar").style.width = "97%";
+    var d = await Talk.debrief(rec.problems);
+    if (d) {
+      if (d.behaviour) { S.comm = { score: d.behaviour.score, strength: d.behaviour.summary, improve: "" }; rec = scoreSession(); }
+      rec.debrief = d;
+      var band = { "Strong hire": [85, 100], "Hire": [72, 84], "Lean hire": [58, 71], "Lean no hire": [42, 57], "No hire": [0, 41] }[d.verdict];
+      if (band) { rec.overall = clamp(rec.overall, band[0], band[1]); rec.verdict = d.verdict; }
+    }
+  }
   S.stage = "done"; saveSession();
   var where = await Store.add(rec);
   lsDel("active");
@@ -2475,7 +2646,9 @@ function scoreSession() {
         perfNote = "Large input ran " + (r <= 1.5 ? "on par with" : r.toFixed(1) + "x slower than") + " the reference.";
       } else if (ls.gen.status === "wrong") perfNote = "Large input returned a wrong answer.";
     }
+    var genWrong = !!(ls && ls.gen && ls.gen.status === "wrong");
     var cx = !reached ? 0 : isSql ? Math.round(corr * 100) : perf === null ? (p.gen ? Math.round(stated.score * 0.6) : stated.score) : Math.round(0.4 * stated.score + 0.6 * perf);
+    if (genWrong) perfNote = "Large input returned a wrong answer, so the solution doesn't hold up at scale.";
     var q = !reached ? { score: 0, issues: ["Not reached."], good: [] } : isSql ? analyzeSql(st.code) : analyzeQuality(st.code, p.fn);
     if (corr < 0.3) q.score = Math.min(q.score, 50);
     var budget = budgetMs();
@@ -2493,7 +2666,7 @@ function scoreSession() {
       perf: perf, perfNote: perfNote, genRatio: ls && ls.gen ? ls.gen.ratio : null, genStatus: ls && ls.gen ? ls.gen.status : null,
       cx: cx, quality: q.score, qualityIssues: q.issues, qualityGood: q.good, speed: speed,
       solveMs: solveMs, spentMs: Math.max(0, spent), approachAtMs: st.approach ? st.approach.at : null,
-      code: st.code
+      code: st.code, fail: ls ? ls.fail || null : null, err: ls ? ls.err || "" : ""
     };
   });
   function avg(k) { return Math.round(per.reduce(function (a, x) { return a + x[k]; }, 0) / per.length); }
@@ -2502,6 +2675,7 @@ function scoreSession() {
   var approachScore = Math.round(per.reduce(function (a, x) { return a + (!x.stated ? 0 : x.stated.verdict === "match" || x.stated.verdict === "na" ? 100 : x.stated.verdict === "better" ? 70 : x.stated.verdict === "worse" ? 55 : x.stated.verdict === "unclear" ? 30 : 25); }, 0) / per.length);
   var nudges = per.reduce(function (a, x) { return a + (x.nudges || 0); }, 0);
   var technical = clamp(Math.round(0.45 * correctness + 0.3 * complexity + 0.25 * approachScore - hints * 6 - nudges * 3), 0, 100);
+  if (per.some(function (x) { return x.reached && !x.solved; })) technical = Math.min(technical, 74);
   var base = 0.25 * technical + 0.3 * correctness + 0.2 * complexity + 0.1 * quality + 0.15 * speed;
   var comm = S.comm || null;
   if (comm) base = 0.9 * base + 0.1 * comm.score;
@@ -2524,7 +2698,8 @@ function highlight(code) {
 }
 
 function renderScorecard(rec, where) {
-  var v = verdictFor(rec.overall), sc = rec.scores, per = rec.problems;
+  var v = verdictFor(rec.overall), sc = rec.scores, per = rec.problems, db = rec.debrief || null;
+  if (db && db.verdict) v = [db.verdict, { "Strong hire": "v-strong", "Hire": "v-hire", "Lean hire": "v-lean" }[db.verdict] || "v-no"];
   var solvedN = per.filter(function (p) { return p.solved; }).length;
   function ev(text) { return '<span class="ev">' + text + "</span>"; }
   var corrEv = per.map(function (p) { return p.reached ? p.passed + " of " + p.total + " tests on " + esc(p.title) : esc(p.title) + " not reached"; }).join("; ") + ".";
@@ -2545,7 +2720,7 @@ function renderScorecard(rec, where) {
     ["Time and space complexity", "Stated bound and measured speed", sc.complexity, cxEv],
     ["Speed", "Time to a fully passing submission", sc.speed, spEv]
   ];
-  if (rec.comm) dims.push(["Communication", "Clarifying, explaining, thinking out loud", rec.comm.score, esc(rec.comm.strength + (rec.comm.improve ? " To improve: " + rec.comm.improve : ""))]);
+  if (rec.comm) dims.push(["Communication and behaviour", "How you came across as a candidate", rec.comm.score, md(rec.comm.strength + (rec.comm.improve ? " To improve: " + rec.comm.improve : "")) + (db && db.behaviour ? " Full review below." : "")]);
   var dimsHtml = dims.map(function (d) {
     var L = lvl(d[2]);
     return '<li><div class="name"><b>' + d[0] + "</b><span>" + d[1] + '</span></div><div><div class="meter"><i class="lvl' + L + '" style="width:' + d[2] + '%"></i></div>' + ev(LVL_NAME[L] + ". " + d[3]) + '</div><div class="val">' + d[2] + "</div></li>";
@@ -2555,7 +2730,32 @@ function renderScorecard(rec, where) {
   var summary = summaryLine(rec, solvedN);
   var html = '<div class="page-head"><div class="who"><div class="avatar">JE</div><div><b>Interview feedback</b><span>' + esc(new Date(rec.endedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })) + " · " + MODES[rec.mode].label + " · " + esc(topicLabel(rec.topic)) + (rec.company && rec.company !== "any" ? " · " + esc(companyLabel(rec.company)) : "") + "</span></div></div></div>";
   html += '<div class="score-top"><div><span class="eyebrow">' + (rec.endReason === "timeout" ? "Time ran out" : "Finished with " + fmtClock(rec.durationMs - rec.usedMs) + " left") + "</span><h1>" + esc(summary.head) + "</h1><p>" + esc(summary.body) + '</p></div><div class="big-score"><div class="num">' + rec.overall + '<small>/100</small></div><span class="verdict-pill ' + v[1] + '">' + v[0] + "</span></div></div>";
+  if (db && (db.summary || db.strengths.length || db.improvements.length)) {
+    var li = function (a) { return a.map(function (x) { return "<li>" + md(x) + "</li>"; }).join(""); };
+    html += '<div class="sheet debrief"><div class="db-head"><div class="avatar sm">JE</div><div><b>Jordan\'s debrief</b><span>What I\'d write up for the hiring committee</span></div><span class="verdict-pill ' + v[1] + '">' + esc(v[0]) + "</span></div>" +
+      (db.summary ? '<p class="db-sum">' + md(db.summary) + "</p>" : "") +
+      '<div class="db-cols">' + (db.strengths.length ? '<div><span class="eyebrow ok">What went well</span><ul>' + li(db.strengths) + "</ul></div>" : "") +
+      (db.improvements.length ? '<div><span class="eyebrow warn">What to fix</span><ul>' + li(db.improvements) + "</ul></div>" : "") + "</div>" +
+      (db.practice.length ? '<div class="db-practice"><span class="eyebrow">Practice next</span><ul>' + li(db.practice) + "</ul></div>" : "") + "</div>";
+  }
   html += '<div class="sheet"><ul class="dims">' + dimsHtml + "</ul></div>";
+  if (db && db.behaviour && db.behaviour.dims.length) {
+    var stt = db.stats || {}, bq = db.behaviour;
+    var chip = function (label, val, note) { return '<div class="stat"><span>' + label + "</span><b>" + esc(val) + "</b>" + (note ? '<small>' + esc(note) + "</small>" : "") + "</div>"; };
+    html += '<h2 class="section-title">Interview behaviour</h2><div class="sheet behaviour"><div class="bh-top"><p>' + md(bq.summary || "") + '</p><div class="bh-score"><b>' + bq.score + '</b><span>/100</span></div></div>';
+    if (stt.turns) html += '<div class="stats bh-stats">' +
+      chip("You spoke", stt.words + " words", stt.turns + " turns, about " + stt.avgWords + " words each") +
+      chip("Your share of talk", stt.talkShare + "%", "interviews usually go best at 55 to 75%") +
+      chip("Filler words", String(stt.fillers), stt.fillPer100 + " per 100 words" + (stt.topFillers && stt.topFillers.length ? ": " + stt.topFillers.join(", ") : "")) +
+      chip("Questions asked", String(stt.questions), stt.firstSpokeMs !== null ? "first spoke at " + fmtClock(stt.firstSpokeMs) : "") +
+      chip("Longest silence", fmtDur(stt.longestQuietMs), "aim for under 2 minutes while coding") +
+      chip("Hedging", String(stt.hedges), "phrases like \"I think\" or \"maybe\"") + "</div>";
+    html += '<ul class="dims bh-dims">' + bq.dims.map(function (d) {
+      var L = lvl(d.score);
+      return '<li><div class="name"><b>' + esc(d.name) + '</b></div><div><div class="meter"><i class="lvl' + L + '" style="width:' + d.score + '%"></i></div><span class="ev">' + md(d.evidence) + "</span>" + (d.tip ? '<span class="tip">' + md(d.tip) + "</span>" : "") + '</div><div class="val">' + d.score + "</div></li>";
+    }).join("") + "</ul>";
+    html += '<p class="store-note">Measured from what the speech recognition heard: your words and timing, not your tone of voice.</p></div>';
+  }
   html += '<p class="store-note" style="margin-top:10px">' + (where === "account" ? "Saved to your session history for this artifact. It will be here on your next visit." : "Saved to session history in this browser.") + " Scores use measured test results and automated heuristics, so treat them as practice signals.</p>";
 
   html += '<h2 class="section-title">Problem by problem</h2>';
@@ -2573,8 +2773,23 @@ function renderScorecard(rec, where) {
     if (pp.approachAtMs !== null) notes.push("Shared the approach " + fmtDur(pp.approachAtMs) + " in" + (pp.stated && pp.stated.revisions > 1 ? " and revised it " + (pp.stated.revisions - 1) + " time" + (pp.stated.revisions > 2 ? "s" : "") : "") + ".");
     notes.push(pp.runs + " run" + (pp.runs === 1 ? "" : "s") + " and " + pp.submits + " submission" + (pp.submits === 1 ? "" : "s") + ".");
     pp.qualityIssues.forEach(function (x) { notes.push(x); });
-    html += '<ul class="notes-list">' + notes.map(function (n) { return "<li>" + md(n) + "</li>"; }).join("") + "</ul></div>";
-    html += '<div class="solution"><span class="eyebrow">Optimal solution · ' + esc(prettyCx(p.optimal.time)) + " time · " + esc(prettyCx(p.optimal.space)) + " space</span>" + p.optimal.explanation.map(function (t) { return "<p>" + md(t) + "</p>"; }).join("") + highlight(p.optimal.code) + ((p.follow_ups || []).length ? '<span class="eyebrow" style="margin-top:6px">Follow ups to practice</span><ul class="notes-list">' + p.follow_ups.map(function (f) { return "<li>" + md(f) + "</li>"; }).join("") + "</ul>" : "") + (p.lc_url ? '<p><a class="extlink" href="' + esc(p.lc_url) + '" target="_blank" rel="noopener">Practice ' + esc(p.title) + " on LeetCode</a></p>" : "") + "</div>";
+    html += '<ul class="notes-list">' + notes.map(function (n) { return "<li>" + md(n) + "</li>"; }).join("") + "</ul>";
+    if (pp.reached && pp.fail) html += '<div class="failcase"><span class="eyebrow">First failing test</span><div class="row"><span>Input</span><code>' + esc(pp.fail.input) + '</code></div><div class="row"><span>Expected</span><code>' + esc(pp.fail.expected) + '</code></div><div class="row"><span>' + (pp.fail.error ? "Error" : "Your output") + "</span><code>" + esc(pp.fail.error || pp.fail.got) + "</code></div></div>";
+    else if (pp.reached && pp.genStatus === "wrong") html += '<div class="failcase"><span class="eyebrow">Large input failed</span><p class="fc-note">Your code returned a wrong answer on the large random input. It is too big to show here, so look for a case the smaller tests missed.</p></div>';
+    var rv = db && (db.problems.filter(function (x) { return x.title && x.title.toLowerCase() === pp.title.toLowerCase(); })[0] || db.problems[per.indexOf(pp)]);
+    if (pp.reached && rv && rv.review) html += '<div class="review"><span class="eyebrow">Jordan\'s code review</span><p>' + md(rv.review) + "</p></div>";
+    var w = rv && rv.walk;
+    if (w && (w.idea || w.steps.length)) {
+      html += '<div class="walk"><span class="eyebrow">How to solve it, step by step</span>' +
+        (w.idea ? '<h4>The key idea</h4><p>' + md(w.idea) + "</p>" : "") +
+        (w.steps.length ? "<h4>The algorithm</h4><ol>" + w.steps.map(function (x) { return "<li>" + md(x) + "</li>"; }).join("") + "</ol>" : "") +
+        (w.example ? '<h4>Dry run</h4><pre class="dry">' + esc(w.example) + "</pre>" : "") +
+        (w.complexity ? "<h4>Why it's " + esc(prettyCx(p.optimal.time)) + " time and " + esc(prettyCx(p.optimal.space)) + " space</h4><p>" + md(w.complexity) + "</p>" : "") +
+        (w.edges.length ? "<h4>Edge cases</h4><ul>" + w.edges.map(function (x) { return "<li>" + md(x) + "</li>"; }).join("") + "</ul>" : "") +
+        (w.vs ? '<h4>Compared with your attempt</h4><p>' + md(w.vs) + "</p>" : "") + "</div>";
+    }
+    html += "</div>";
+    html += '<div class="solution"><span class="eyebrow">Reference solution · ' + esc(prettyCx(p.optimal.time)) + " time · " + esc(prettyCx(p.optimal.space)) + " space</span>" + p.optimal.explanation.map(function (t) { return "<p>" + md(t) + "</p>"; }).join("") + highlight(p.optimal.code) + ((p.follow_ups || []).length ? '<span class="eyebrow" style="margin-top:6px">Follow ups to practice</span><ul class="notes-list">' + p.follow_ups.map(function (f) { return "<li>" + md(f) + "</li>"; }).join("") + "</ul>" : "") + (p.lc_url ? '<p><a class="extlink" href="' + esc(p.lc_url) + '" target="_blank" rel="noopener">Practice ' + esc(p.title) + " on LeetCode</a></p>" : "") + "</div>";
     html += '<details class="yours"><summary>Your final code</summary>' + highlight(pp.code || "") + "</details></div>";
   });
   var tx = (rec.transcript || []).filter(function (c) { return c.at > 0 || c.w === "me"; });
@@ -2589,16 +2804,24 @@ function renderScorecard(rec, where) {
 }
 function stat(label, val, cls) { return '<div class="stat"><span>' + label + '</span><b class="' + (cls || "") + '">' + esc(val) + "</b></div>"; }
 function summaryLine(rec, solvedN) {
-  var n = rec.problems.length, sc = rec.scores;
-  var head = solvedN === n ? (n > 1 ? "Both problems solved." : "Problem solved.") : solvedN ? "One of two problems solved." : "Not fully solved this time.";
+  var n = rec.problems.length, sc = rec.scores, reached = rec.problems.filter(function (p) { return p.reached; });
+  var close = reached.filter(function (p) { return !p.solved && p.corr >= 70; }).length;
+  var head = solvedN === n ? (n > 1 ? "Both problems solved." : "Problem solved.") : solvedN ? "One of two problems solved." : close ? "Close, but not fully correct." : "Not fully solved this time.";
   var parts = [];
-  if (sc.complexity >= 85) parts.push("Your complexity reasoning matched the optimal bound.");
-  else if (sc.complexity >= 55) parts.push("Your solution works, but there is room to tighten the complexity.");
-  else parts.push("Complexity is the biggest gap to close.");
+  reached.forEach(function (p) {
+    if (p.solved) return;
+    var failed = p.total - p.passed, pre = n > 1 ? p.title + ": " : "", cap = function (t) { return pre ? t : t.charAt(0).toUpperCase() + t.slice(1); };
+    if (p.err && !p.passed) parts.push(pre + cap("the code raised an error before any test passed."));
+    else if (failed) parts.push(pre + cap("your code fails") + "  " + failed + " of " + p.total + " tests" + (p.genStatus === "wrong" ? ", including the large input" : p.genStatus === "tle" ? ", and the large input ran out of time" : "") + ", so there's a correctness bug to find.");
+  });
+  if (solvedN) {
+    if (sc.complexity >= 85) parts.push("Your complexity matched the optimal bound.");
+    else if (sc.complexity >= 55) parts.push("It works, but the complexity can be tightened.");
+    else parts.push("It works, but complexity is the biggest gap to close.");
+  }
   if (rec.hints) parts.push("The " + rec.hints + " hint" + (rec.hints > 1 ? "s" : "") + " cost " + rec.hintPenalty + " points.");
-  if (sc.speed >= 85) parts.push("You moved quickly.");
-  else if (sc.speed < 50 && solvedN) parts.push("Pace is worth practicing.");
-  parts.push("Read the optimal solution below, then try another round.");
+  if (sc.speed >= 85 && solvedN) parts.push("You moved quickly.");
+  parts.push(rec.debrief ? "Jordan's notes and the optimal solution are below." : "The failing test and the optimal solution are below.");
   return { head: head, body: parts.join(" ") };
 }
 
