@@ -200,6 +200,28 @@ body.in-room, html:has(body.in-room) { height: 100%; }
 .bh-dims .tip { display: block; margin-top: 4px; font-size: 12.5px; color: var(--accent); }
 .bh-dims .tip::before { content: "Tip: "; font-weight: 600; }
 .behaviour .store-note { padding: 0 20px; }
+table.clickable tbody tr { cursor: pointer; }
+table.clickable tbody tr:hover, table.clickable tbody tr:focus-visible { background: var(--sunk); outline: none; }
+table.clickable td.open { color: var(--accent); font-weight: 500; white-space: nowrap; }
+.okmark { color: var(--ok); font-size: 12px; font-family: var(--font-ui); }
+.actions-row.top { margin: 0 0 12px; }
+.review.progress { border-left-color: var(--ok); background: var(--ok-soft); }
+.attempts { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+.att-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.att-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.att { display: grid; text-align: center; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; min-width: 64px; }
+.att span { font-size: 11.5px; color: var(--muted); } .att b { font-family: var(--font-mono); font-size: 16px; } .att small { font-size: 11px; color: var(--muted); }
+.att.cur { border-color: var(--accent); background: var(--accent-soft); }
+.att-arrow { color: var(--faint); }
+.att-diff { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+.attempt { padding: 14px 18px; margin-bottom: 14px; }
+.att-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.att-top > div:first-child { flex: 1; display: grid; } .att-top span:not(.verdict-pill) { font-size: 12.5px; color: var(--muted); }
+.att-score { font-family: var(--font-mono); font-size: 24px; font-weight: 600; } .att-score small { font-size: 13px; color: var(--muted); }
+.attempt .stats { margin-top: 10px; }
+.att-fix ul { margin: 4px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.55; }
+.att-fix { margin-top: 12px; }
+.att-none { font-size: 13px; margin: 10px 0 0; }
 .failcase code { font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; background: none; padding: 0; }
 .review { margin-top: 12px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; }
 .review p { margin: 4px 0 0; font-size: 14px; line-height: 1.6; }
@@ -1565,6 +1587,11 @@ var Talk = {
       L.push("Final tests: " + x.passed + " of " + x.total + " passed. " + (x.genStatus === "wrong" ? "Large input: wrong answer. " : x.genStatus === "tle" ? "Large input: too slow. " : x.genRatio ? "Large input ran " + x.genRatio.toFixed(1) + "x the reference time. " : "") + (x.fail ? "First failing test: " + x.fail.input + "; expected " + x.fail.expected + (x.fail.error ? "; error " + x.fail.error : "; got " + x.fail.got) + ". " : "") + (x.err ? "The code raised: " + x.err : ""));
       L.push("Hints used: " + x.hints + ". Verbal nudges from the interviewer: " + (x.nudges || 0) + ". Runs (examples only): " + x.runs + ", submits (hidden tests): " + x.submits + ". Time on problem: " + fmtDur(x.spentMs) + " of a " + fmtDur(budgetMs()) + " budget" + (x.solveMs !== null && x.solved ? ", first fully passing submit at " + fmtDur(x.solveMs) : "") + ".");
       if ((st.notes || "").trim()) L.push("Their notepad:\n" + st.notes.slice(0, 1200));
+      var prev = attemptsFor(x.id).filter(function (a) { return a.rec.id !== S.id; }).slice(-3);
+      if (prev.length) L.push("Their earlier attempts at this same problem:\n" + prev.map(function (a) {
+        var d = a.rec.debrief, rv = d && reviewFor(d, a.prob, a.idx);
+        return "- " + new Date(a.rec.endedAt).toLocaleDateString() + ": " + (a.prob.reached ? a.prob.passed + "/" + a.prob.total + " tests" : "not reached") + ", score " + a.rec.overall + (a.rec.verdict ? ", " + a.rec.verdict : "") + (rv && rv.review ? ". Code review then: " + rv.review : "") + (d && d.improvements && d.improvements.length ? ". Told to fix: " + d.improvements.join(" / ") : "");
+      }).join("\n"));
       L.push("Their final code:\n" + (x.code || "").slice(0, 4000));
       return L.join("\n");
     }).join("\n\n");
@@ -1595,6 +1622,7 @@ var Talk = {
       ' "problems": [{',
       '   "title": "problem title",',
       '   "review": "two to four sentences of code review of their final code: the bug or weakness and the fix, or what was good",',
+      '   "progress": "if they attempted this problem before, one or two sentences on what improved or didn\'t since then, including whether they fixed what they were told; otherwise an empty string",',
       '   "walkthrough": {',
       '     "idea": "the key insight in two or three sentences, the way you would explain it to them at a whiteboard",',
       '     "steps": ["four to seven steps of the algorithm in plain words"],',
@@ -1625,7 +1653,7 @@ var Talk = {
         strengths: list(r.strengths, 3), improvements: list(r.improvements, 3), practice: list(r.practice, 3),
         problems: (Array.isArray(r.problems) ? r.problems : []).slice(0, 2).map(function (x) {
           var w = x && x.walkthrough || {};
-          return { title: str(x && x.title, 120), review: str(x && x.review, 900),
+          return { title: str(x && x.title, 120), review: str(x && x.review, 900), progress: str(x && x.progress, 600),
             walk: { idea: str(w.idea, 700), steps: list(w.steps, 8, 300), example: str(w.example, 1500), complexity: str(w.complexity, 500), edges: list(w.edge_cases, 6, 200), vs: str(w.vs_yours, 700) } };
         }),
         behaviour: bscore === null ? null : { score: bscore, summary: str(b.summary, 500), dims: dims },
@@ -2608,7 +2636,7 @@ async function gradeAndShow() {
   if (Talk.sample) {
     $("veilText").textContent = "Jordan is writing up your feedback: code review, the correct approach and your interview behaviour. This takes about a minute.";
     $("veilBar").style.width = "97%";
-    var d = await Talk.debrief(rec.problems);
+    var d = null; try { d = await Talk.debrief(rec.problems); } catch (e) { d = null; }
     if (d) {
       if (d.behaviour) { S.comm = { score: d.behaviour.score, strength: d.behaviour.summary, improve: "" }; rec = scoreSession(); }
       rec.debrief = d;
@@ -2697,9 +2725,9 @@ function highlight(code) {
   return pre.outerHTML;
 }
 
-function renderScorecard(rec, where) {
-  var v = verdictFor(rec.overall), sc = rec.scores, per = rec.problems, db = rec.debrief || null;
-  if (db && db.verdict) v = [db.verdict, { "Strong hire": "v-strong", "Hire": "v-hire", "Lean hire": "v-lean" }[db.verdict] || "v-no"];
+function renderScorecard(rec, where, opts) {
+  opts = opts || {};
+  var v = verdictOf(rec), sc = rec.scores, per = rec.problems, db = rec.debrief || null;
   var solvedN = per.filter(function (p) { return p.solved; }).length;
   function ev(text) { return '<span class="ev">' + text + "</span>"; }
   var corrEv = per.map(function (p) { return p.reached ? p.passed + " of " + p.total + " tests on " + esc(p.title) : esc(p.title) + " not reached"; }).join("; ") + ".";
@@ -2756,7 +2784,7 @@ function renderScorecard(rec, where) {
     }).join("") + "</ul>";
     html += '<p class="store-note">Measured from what the speech recognition heard: your words and timing, not your tone of voice.</p></div>';
   }
-  html += '<p class="store-note" style="margin-top:10px">' + (where === "account" ? "Saved to your session history for this artifact. It will be here on your next visit." : "Saved to session history in this browser.") + " Scores use measured test results and automated heuristics, so treat them as practice signals.</p>";
+  html += '<p class="store-note" style="margin-top:10px">' + (opts.from ? "From your session history." : where === "account" ? "Saved to your session history for this artifact. It will be here on your next visit." : "Saved to session history in this browser.") + " Scores use measured test results and automated heuristics, so treat them as practice signals.</p>";
 
   html += '<h2 class="section-title">Problem by problem</h2>';
   per.forEach(function (pp) {
@@ -2778,6 +2806,14 @@ function renderScorecard(rec, where) {
     else if (pp.reached && pp.genStatus === "wrong") html += '<div class="failcase"><span class="eyebrow">Large input failed</span><p class="fc-note">Your code returned a wrong answer on the large random input. It is too big to show here, so look for a case the smaller tests missed.</p></div>';
     var rv = db && (db.problems.filter(function (x) { return x.title && x.title.toLowerCase() === pp.title.toLowerCase(); })[0] || db.problems[per.indexOf(pp)]);
     if (pp.reached && rv && rv.review) html += '<div class="review"><span class="eyebrow">Jordan\'s code review</span><p>' + md(rv.review) + "</p></div>";
+    if (pp.reached && rv && rv.progress) html += '<div class="review progress"><span class="eyebrow">Since your last attempt</span><p>' + md(rv.progress) + "</p></div>";
+    var att = attemptsFor(pp.id).filter(function (a) { return a.rec.endedAt <= rec.endedAt; });
+    if (pp.reached && att.length > 1) {
+      var me = att[att.length - 1], before = att[att.length - 2], diff = attemptDiff(before, me);
+      html += '<div class="attempts"><div class="att-head"><span class="eyebrow">Your attempts at this question</span><button class="btn quiet" type="button" data-q="' + esc(pp.id) + '">See all ' + attemptsFor(pp.id).length + " attempts</button></div>" +
+        '<div class="att-row">' + att.slice(-5).map(function (a) { return '<div class="att' + (a.rec.id === rec.id ? " cur" : "") + '"><span>' + esc(new Date(a.rec.endedAt).toLocaleDateString([], { month: "short", day: "numeric" })) + "</span><b>" + a.rec.overall + "</b><small>" + a.prob.passed + "/" + a.prob.total + " tests</small></div>"; }).join('<span class="att-arrow">→</span>') + "</div>" +
+        (diff.length ? '<p class="att-diff">Compared with ' + esc(new Date(before.rec.endedAt).toLocaleDateString([], { month: "short", day: "numeric" })) + ": " + esc(diff.join(", ")) + ".</p>" : "") + "</div>";
+    }
     var w = rv && rv.walk;
     if (w && (w.idea || w.steps.length)) {
       html += '<div class="walk"><span class="eyebrow">How to solve it, step by step</span>' +
@@ -2797,10 +2833,13 @@ function renderScorecard(rec, where) {
     html += '<h2 class="section-title">Conversation</h2><div class="sheet"><details class="yours convo"><summary>Transcript of what you and Jordan said (' + tx.length + " lines)</summary><div class=\"transcript\">" +
       tx.map(function (c) { return '<div class="msg' + (c.w === "me" ? " me" : "") + '">' + (c.w === "me" ? "" : '<div class="avatar sm">JE</div>') + '<div class="bubble"><span class="ts">' + fmtClock(c.at) + "</span> " + esc(c.t) + "</div></div>"; }).join("") + "</div></details></div>";
   }
-  html += '<div class="actions-row"><button class="btn primary big" type="button" id="againBtn">Start another interview</button><button class="btn big" type="button" id="toHist">View history</button></div>';
+  html += '<div class="actions-row"><button class="btn primary big" type="button" id="againBtn">Start another interview</button><button class="btn big" type="button" id="toHist">' + (opts.from ? "Back to history" : "View history") + "</button></div>";
+  if (opts.from) html = '<div class="actions-row top"><button class="btn" type="button" id="toHistTop">← Back to ' + (opts.from === "question" ? "question" : "history") + "</button></div>" + html;
   $("scoreDoc").innerHTML = html;
   $("againBtn").onclick = function () { buildLobby(); show("lobby"); };
-  $("toHist").onclick = function () { renderHistory(); show("history"); };
+  $("toHist").onclick = function () { if (opts.from === "question" && opts.qid) renderQuestion(opts.qid); else renderHistory(); show("history"); };
+  if ($("toHistTop")) $("toHistTop").onclick = $("toHist").onclick;
+  $("scoreDoc").querySelectorAll("[data-q]").forEach(function (b) { b.onclick = function () { renderQuestion(b.dataset.q); show("history"); }; });
 }
 function stat(label, val, cls) { return '<div class="stat"><span>' + label + '</span><b class="' + (cls || "") + '">' + esc(val) + "</b></div>"; }
 function summaryLine(rec, solvedN) {
@@ -2881,10 +2920,49 @@ $("bankRows").addEventListener("click", async function (ev) {
 });
 
 /* ================= history ================= */
+function attemptsFor(id) {
+  var out = [];
+  Store.all().forEach(function (r) { (r.problems || []).forEach(function (pp, i) { if (pp.id === id && pp.reached) out.push({ rec: r, prob: pp, idx: i }); }); });
+  return out.sort(function (a, b) { return a.rec.endedAt - b.rec.endedAt; });
+}
+function reviewFor(db, pp, i) {
+  if (!db || !db.problems) return null;
+  return db.problems.filter(function (x) { return x.title && x.title.toLowerCase() === String(pp.title).toLowerCase(); })[0] || db.problems[i] || null;
+}
+function verdictOf(r) {
+  var v = verdictFor(r.overall);
+  if (r.verdict && r.debrief) v = [r.verdict, { "Strong hire": "v-strong", "Hire": "v-hire", "Lean hire": "v-lean" }[r.verdict] || "v-no"];
+  return v;
+}
+// what changed between two attempts at the same question
+function attemptDiff(a, b) {
+  var out = [], pa = a.prob, pb = b.prob;
+  var arrow = function (x, y) { return x + " → " + y; };
+  if (pa.passed + "/" + pa.total !== pb.passed + "/" + pb.total) out.push("Tests " + arrow(pa.passed + "/" + pa.total, pb.passed + "/" + pb.total));
+  if (!pa.solved && pb.solved) out.push("Now fully solved");
+  if (a.rec.overall !== b.rec.overall) out.push("Score " + arrow(a.rec.overall, b.rec.overall) + " (" + (b.rec.overall > a.rec.overall ? "+" : "") + (b.rec.overall - a.rec.overall) + ")");
+  if (pa.spentMs && pb.spentMs && Math.abs(pa.spentMs - pb.spentMs) > 60000) out.push("Time " + arrow(fmtDur(pa.spentMs), fmtDur(pb.spentMs)));
+  if ((pa.hints || 0) !== (pb.hints || 0)) out.push("Hints " + arrow(pa.hints || 0, pb.hints || 0));
+  var ba = a.rec.debrief && a.rec.debrief.behaviour, bb = b.rec.debrief && b.rec.debrief.behaviour;
+  if (ba && bb && ba.score !== bb.score) out.push("Behaviour " + arrow(ba.score, bb.score));
+  return out;
+}
+async function openRecord(id, back) {
+  var rec = Store.all().filter(function (r) { return r.id === id; })[0]; if (!rec) return;
+  try { await loadProblems(rec.problems.map(function (p) { return p.id; }).filter(function (x) { return BY_SLUG[x] && BY_SLUG[x].shard >= 0; })); } catch (e) { toast("Couldn't load that session's problems. Check your connection.", true); return; }
+  renderScorecard(rec, Store.mode, { from: back || "history" });
+  show("score");
+}
+async function practiceAgain(id) {
+  var e = BY_SLUG[id]; if (!e || e.shard < 0) return;
+  var pref = lsGet("prefs", {});
+  await beginSession(pref.mode === "quick20" ? "quick20" : "one45", e.topic, "any", pref.name || "Mayank", [e]);
+}
+var histView = "sessions";
 function renderHistory() {
   var h = Store.all();
   var html = '<div class="page-head"><h1>Session history</h1><button class="btn" type="button" id="histBack">Back</button><button class="btn" type="button" id="histBank">Question bank</button><button class="btn primary" type="button" id="histNew">New interview</button></div>';
-  html += '<p class="store-note">' + (Store.mode === "account" ? "Stored with this artifact for your account, so it carries over between visits." : "Stored in this browser.") + "</p>";
+  html += '<p class="store-note">' + (Store.mode === "account" ? "Stored with this artifact for your account, so it carries over between visits." : "Stored in this browser.") + " Click any session to open its full feedback.</p>";
   if (!h.length) {
     html += '<div class="sheet" style="margin-top:16px"><div class="empty"><p>No sessions yet. Finish an interview and its scorecard appears here, with your trend over time and averages by topic.</p></div></div>';
   } else {
@@ -2897,18 +2975,64 @@ function renderHistory() {
     h.forEach(function (r) { r.problems.forEach(function (p) { if (!p.reached) return; var t = byTopic[p.topic] = byTopic[p.topic] || { n: 0, corr: 0 }; t.n++; t.corr += p.corr; }); });
     var tKeys = Object.keys(byTopic).sort(function (a, b) { return byTopic[b].corr / byTopic[b].n - byTopic[a].corr / byTopic[a].n; });
     html += '<div class="sheet"><div class="head"><h2>Correctness by topic</h2></div><div class="topic-bars">' + tKeys.map(function (k) { var a = Math.round(byTopic[k].corr / byTopic[k].n); return '<div class="tb"><span>' + esc(TOPIC_LABEL[k] || k) + '</span><div class="meter"><i class="lvl' + lvl(a) + '" style="width:' + a + '%"></i></div><span>' + a + "% · " + byTopic[k].n + "</span></div>"; }).join("") + "</div></div>";
-    html += '<div class="sheet"><div class="head"><h2>All sessions</h2><span class="spacer"></span><button class="btn quiet" type="button" id="clearHist">Clear history</button></div><div class="table-wrap"><table class="hist"><thead><tr><th>Date</th><th>Format</th><th>Problems</th><th>Tests</th><th>Hints</th><th>Score</th><th>Verdict</th></tr></thead><tbody>';
-    h.forEach(function (r) {
-      var v = verdictFor(r.overall);
-      html += "<tr><td>" + esc(new Date(r.endedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })) + '<br><span class="dim">' + esc(new Date(r.endedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</span></td><td>" + esc(MODES[r.mode] ? MODES[r.mode].label : r.mode) + '<br><span class="dim">' + esc(topicLabel(r.topic)) + (r.company && r.company !== "any" ? " · " + esc(companyLabel(r.company)) : "") + "</span></td><td>" + r.problems.map(function (p) { return esc(p.title) + ' <span class="dim">' + p.difficulty + "</span>"; }).join("<br>") + '</td><td class="num">' + r.problems.map(function (p) { return p.reached ? p.passed + "/" + p.total : "none"; }).join("<br>") + '</td><td class="num">' + r.hints + '</td><td class="num"><b>' + r.overall + '</b></td><td><span class="verdict-pill ' + v[1] + '" style="margin:0">' + v[0] + "</span></td></tr>";
-    });
+    html += '<div class="sheet"><div class="head"><div class="seg" role="group" aria-label="View"><button type="button" id="hvSessions" aria-pressed="' + (histView === "sessions") + '">All sessions</button><button type="button" id="hvQuestions" aria-pressed="' + (histView === "questions") + '">By question</button></div><span class="spacer"></span><button class="btn quiet" type="button" id="clearHist">Clear history</button></div><div class="table-wrap">';
+    if (histView === "sessions") {
+      html += '<table class="hist clickable"><thead><tr><th>Date</th><th>Format</th><th>Problems</th><th>Tests</th><th>Hints</th><th>Score</th><th>Verdict</th><th></th></tr></thead><tbody>';
+      h.forEach(function (r) {
+        var v = verdictOf(r);
+        html += '<tr data-sid="' + esc(r.id) + '" tabindex="0"><td>' + esc(new Date(r.endedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })) + '<br><span class="dim">' + esc(new Date(r.endedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</span></td><td>" + esc(MODES[r.mode] ? MODES[r.mode].label : r.mode) + '<br><span class="dim">' + esc(topicLabel(r.topic)) + (r.company && r.company !== "any" ? " · " + esc(companyLabel(r.company)) : "") + "</span></td><td>" + r.problems.map(function (p) { return esc(p.title) + ' <span class="dim">' + p.difficulty + "</span>"; }).join("<br>") + '</td><td class="num">' + r.problems.map(function (p) { return p.reached ? p.passed + "/" + p.total : "none"; }).join("<br>") + '</td><td class="num">' + r.hints + '</td><td class="num"><b>' + r.overall + '</b></td><td><span class="verdict-pill ' + v[1] + '" style="margin:0">' + esc(v[0]) + '</span></td><td class="open">Open →</td></tr>';
+      });
+    } else {
+      var qs = {}, order = [];
+      h.slice().reverse().forEach(function (r) { r.problems.forEach(function (p) { if (!p.reached) return; if (!qs[p.id]) { qs[p.id] = []; order.push(p.id); } qs[p.id].push({ rec: r, prob: p }); }); });
+      order.sort(function (a, b) { return qs[b][qs[b].length - 1].rec.endedAt - qs[a][qs[a].length - 1].rec.endedAt; });
+      html += '<table class="hist clickable"><thead><tr><th>Question</th><th>Attempts</th><th>Latest tests</th><th>Score trend</th><th>Best</th><th>Last tried</th><th></th></tr></thead><tbody>';
+      order.forEach(function (id) {
+        var a = qs[id], last = a[a.length - 1], bestS = a.reduce(function (m, x) { return Math.max(m, x.rec.overall); }, 0);
+        html += '<tr data-qid="' + esc(id) + '" tabindex="0"><td>' + esc(last.prob.title) + ' <span class="dim">' + last.prob.difficulty + '</span></td><td class="num">' + a.length + '</td><td class="num">' + last.prob.passed + "/" + last.prob.total + (last.prob.solved ? ' <span class="okmark">solved</span>' : "") + '</td><td class="num">' + a.slice(-5).map(function (x) { return x.rec.overall; }).join(" → ") + '</td><td class="num"><b>' + bestS + "</b></td><td>" + esc(new Date(last.rec.endedAt).toLocaleDateString([], { month: "short", day: "numeric" })) + '</td><td class="open">Open →</td></tr>';
+      });
+    }
     html += "</tbody></table></div></div>";
   }
   $("historyDoc").innerHTML = html;
   $("histBack").onclick = function () { buildLobby(); show("lobby"); };
   $("histNew").onclick = function () { buildLobby(); show("lobby"); };
   $("histBank").onclick = function () { openBank(); };
+  if ($("hvSessions")) { $("hvSessions").onclick = function () { histView = "sessions"; renderHistory(); }; $("hvQuestions").onclick = function () { histView = "questions"; renderHistory(); }; }
+  $("historyDoc").querySelectorAll("tr[data-sid]").forEach(function (tr) { var go = function () { openRecord(tr.dataset.sid, "history"); }; tr.onclick = go; tr.onkeydown = function (e) { if (e.key === "Enter") go(); }; });
+  $("historyDoc").querySelectorAll("tr[data-qid]").forEach(function (tr) { var go = function () { renderQuestion(tr.dataset.qid); }; tr.onclick = go; tr.onkeydown = function (e) { if (e.key === "Enter") go(); }; });
   if ($("clearHist")) armConfirm($("clearHist"), "Delete all sessions?", async function () { await Store.clear(); renderHistory(); });
+}
+
+// every attempt at one question, oldest first, with the feedback from each and what changed
+function renderQuestion(id) {
+  var att = attemptsFor(id);
+  if (!att.length) { renderHistory(); return; }
+  var e = BY_SLUG[id], last = att[att.length - 1].prob;
+  var html = '<div class="page-head"><h1>' + esc(last.title) + '</h1><button class="btn" type="button" id="qBack">← History</button>' + (e && e.shard >= 0 ? '<button class="btn primary" type="button" id="qAgain">Practice it again</button>' : "") + "</div>";
+  html += '<p class="store-note"><span class="pill ' + last.difficulty + '">' + last.difficulty + '</span> <span class="pill">' + esc(TOPIC_LABEL[last.topic] || last.topic) + "</span> " + att.length + " attempt" + (att.length > 1 ? "s" : "") + (e && e.lc_id ? ' · <a class="extlink" href="https://leetcode.com/problems/' + esc(id) + '/" target="_blank" rel="noopener">LeetCode #' + e.lc_id + "</a>" : "") + "</p>";
+  var first = att[0], best = att.reduce(function (m, a) { return a.rec.overall > m.rec.overall ? a : m; }, att[0]);
+  html += '<div class="hist-stats">' + stat("Attempts", String(att.length)) + stat("First score", String(first.rec.overall)) + stat("Latest score", String(att[att.length - 1].rec.overall)) + stat("Best", best.rec.overall + " · " + best.prob.passed + "/" + best.prob.total + " tests") + "</div>";
+  if (att.length > 1) html += '<div class="sheet"><div class="head"><h2>Score on this question</h2></div><div class="chart-wrap">' + trendChart(att.map(function (a) { return a.rec; })) + "</div></div>";
+  html += '<h2 class="section-title">Every attempt, newest first</h2>';
+  att.slice().reverse().forEach(function (a, k) {
+    var i = att.length - 1 - k, prev = i > 0 ? att[i - 1] : null, d = a.rec.debrief, rv = d && reviewFor(d, a.prob, a.idx), v = verdictOf(a.rec), pp = a.prob;
+    html += '<div class="sheet attempt"><div class="att-top"><div><b>Attempt ' + (i + 1) + "</b><span>" + esc(new Date(a.rec.endedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })) + " · " + esc(MODES[a.rec.mode] ? MODES[a.rec.mode].label : a.rec.mode) + '</span></div><span class="verdict-pill ' + v[1] + '">' + esc(v[0]) + '</span><div class="att-score">' + a.rec.overall + "<small>/100</small></div></div>";
+    html += '<div class="stats">' + stat("Tests passed", pp.passed + " / " + pp.total, pp.solved ? "good" : pp.passed ? "meh" : "bad") + stat("Your complexity", pp.stated ? prettyCx(pp.stated.time) + " · " + prettyCx(pp.stated.space) : "Not shared", pp.stated && pp.stated.verdict === "match" ? "good" : "meh") + stat("Time spent", fmtDur(pp.spentMs || 0), "") + stat("Hints", String(pp.hints || 0), pp.hints ? "meh" : "good") + (d && d.behaviour ? stat("Behaviour", String(d.behaviour.score), d.behaviour.score >= 70 ? "good" : "meh") : "") + "</div>";
+    var diff = prev ? attemptDiff(prev, a) : [];
+    if (diff.length) html += '<p class="att-diff">Since attempt ' + i + ": " + esc(diff.join(", ")) + ".</p>";
+    if (rv && rv.progress) html += '<div class="review progress"><span class="eyebrow">Jordan on your progress</span><p>' + md(rv.progress) + "</p></div>";
+    if (rv && rv.review) html += '<div class="review"><span class="eyebrow">Code review</span><p>' + md(rv.review) + "</p></div>";
+    if (d && d.improvements && d.improvements.length) html += '<div class="att-fix"><span class="eyebrow warn">What to fix</span><ul>' + d.improvements.map(function (x) { return "<li>" + md(x) + "</li>"; }).join("") + "</ul></div>";
+    if (!d) html += '<p class="dim att-none">This attempt was before detailed feedback was added, so it only has scores.</p>';
+    html += '<div class="actions-row"><button class="btn" type="button" data-open="' + esc(a.rec.id) + '">Open full feedback</button></div></div>';
+  });
+  $("historyDoc").innerHTML = html;
+  $("qBack").onclick = function () { histView = "questions"; renderHistory(); };
+  if ($("qAgain")) $("qAgain").onclick = async function () { this.disabled = true; this.textContent = "Preparing..."; await practiceAgain(id); };
+  $("historyDoc").querySelectorAll("[data-open]").forEach(function (b) { b.onclick = async function () { await openRecord(b.dataset.open, "question"); var tb = $("toHist"); if (tb) { tb.onclick = function () { renderQuestion(id); show("history"); }; if ($("toHistTop")) $("toHistTop").onclick = tb.onclick; } }; });
+  show("history");
+  window.scrollTo(0, 0);
 }
 function trendChart(rows) {
   var W = 720, H = 220, L = 34, R = 16, T = 14, B = 30;
